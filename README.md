@@ -4,9 +4,9 @@
 
 **scope-acquire** is a lightweight C framework for oscilloscope trace acquisition over _VISA_.  
 
-It provides:
-- An **Acquisition Engine** that runs a user-defined `acquire` function (per acquisition attempt).
-- A **writer thread** that handles trace storage asynchronously, avoiding I/O bottlenecks.  
+Provides:
+- an **Acquisition Engine** that runs a user-defined `acquire` function (per acquisition attempt).
+- a **writer thread** that handles trace storage asynchronously, avoiding I/O bottlenecks.  
 
 The framework is modular: new oscilloscope models can be supported by adding drivers.  
 Currently supported: **Rigol DS1000ZE**.  
@@ -71,7 +71,7 @@ Shows usage instructions.
 ```
 
 This connects to the first VISA instrument found and acquires **1000 traces**.  
-The `--batch` parameter controls how many traces are written per flush by the writer thread.
+The `--batch` parameter controls how many traces are written per flush by the writer thread. Omit `--outfile` to run acquisition without storing traces.
 
 ### 5. Diagnostic Mode
 
