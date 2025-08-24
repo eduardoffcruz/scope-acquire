@@ -1,8 +1,8 @@
-# scope-acquire
+# scoop-acquire
 
 ## Overview
 
-**scope-acquire** is a lightweight C framework for oscilloscope trace acquisition over _VISA_.  
+**scoop-acquire** is a lightweight C framework for scope trace acquisition over _VISA_.  
 
 Provides:
 - an **Acquisition Engine** that runs a user-defined `acquire` function (per acquisition attempt).
@@ -18,7 +18,7 @@ Compatible with macOS and Linux (NI-VISA or other).
 ## Project Structure
 
 ```
-scope-acquire/
+scoop-acquire/
 ├── engine/            # Core engine
 ├── scope/             # Scope abstraction + drivers
 │   ├── rigol/         # Rigol DS1000ZE driver
@@ -44,7 +44,7 @@ scope-acquire/
 
 ```bash
 # Clone repository
-git clone https://github.com/eduardoffcruz/scope-acquire.git
+git clone https://github.com/eduardoffcruz/scoop-acquire.git
 cd scope-acquire
 
 # Build static library + your acquisition file
