@@ -23,7 +23,8 @@ scoop-acquire/
 ├── scope/             # Scope abstraction + drivers
 │   ├── rigol/         # Rigol DS1000ZE driver
 │   └── scope.c
-├── build/             # Build artifacts
+├── core_build/        # Core build artifacts
+├── build_…/           # Custom acquisition build artifacts
 ├── main.c             # Example entry point (defines which driver is used)
 ├── example_acquire.c  # Example acquisition procedure
 ├── Makefile
@@ -54,12 +55,12 @@ make acquire=my_acquire.c
 > The `acquire` argument must point to your implementation of the `acquire()` function.  
 > The scope driver in use is selected inside `main.c`.
 
-Build output is placed in `build/`.
+Build output is placed in `build_…/` (e.g., `make acquire=my_acquire.c` builds to `build_my_acquire/`)
 
 ### 3. Usage
 
 ```bash
-./build/example_acquire --help
+./build_example_acquire/example_acquire --help
 ```
 
 Shows usage instructions.
@@ -67,16 +68,16 @@ Shows usage instructions.
 ### 4. Example Run
 
 ```bash
-./build/example_acquire   --outfile /Volumes/my-ssd/acquisition   --ntraces 1000   --batch 100   --coding 0   --channels CHAN1,CHAN2   --verbose
+./build_example_acquire/example_acquire   --outfile /Volumes/my-ssd/acquisition   --ntraces 100000   --batch 2500   --coding 0   --channels CHAN1,CHAN2   --verbose
 ```
 
-This connects to the first VISA instrument found and acquires **1000 traces**.  
+This connects to the first VISA instrument found and acquires **100000 traces**.  
 The `--batch` parameter controls how many traces are written per flush by the writer thread. Omit `--outfile` to run acquisition without storing traces.
 
 ### 5. Diagnostic Mode
 
 ```bash
-./build/example_acquire --diagnose
+./build_example_acquire/example_acquire --diagnose
 ```
 
 Prints oscilloscope configuration and supported features without running an acquisition.
