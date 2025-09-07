@@ -28,11 +28,11 @@ typedef struct {
     int (*arm)(Scope *s);
     int (*stop)(Scope *s);
     int (*force_trigger)(Scope *s);
-    int (*read_trace)(Scope *s, uint8_t *dst, RunConfig *cfg); /* use cfg->n_samples, cfg->channels, cfg->n_channels */
+    int (*read_trace)(Scope *s, uint8_t *dst, const RunConfig *cfg); /* use cfg->n_samples, cfg->channels, cfg->n_channels */
     int (*check_if_armed)(Scope *s, bool *armed);
     int (*check_if_triggered)(Scope *s, bool *triggered);
     int (*list_displayed_channels)(Scope *s, char ***out, uint8_t *out_n);
-    int (*dump_log)(Scope *s, FILE *fp_log, RunConfig *cfg);
+    int (*dump_log)(Scope *s, FILE *fp_log, const RunConfig *cfg);
 } ScopeDriver;
 
 /* -------- Generic scope handle shared by core + drivers -------- */

@@ -1,78 +1,113 @@
-# ===== Scope-Acquire Makefile =====
+# ===== minimal split build: core_build + per-acquire build_<name> =====
 # Usage:
-#   make                                # builds default example
-#   make acquire_func=example_acquire.c # choose acquisition file
-#   make run                            # run the built binary
-# Result: build/<basename>
+#   make acquire=/abs/or/rel/path/to/rpi_acquire.c
+#   make clean                 # cleans core only
+#   make clean acquire=...     # cleans only build_<name> for that acquire
 
-TOP        := $(abspath .)
-BUILD_DIR  := build
+# ---- toolchain ----
+CC      := cc
+AR      := ar
+ARFLAGS := rcs
 
-# ---- Core sources (adjust if your tree differs) ----
-CORE_SRCS  := \
-    engine/engine.c \
-    engine/utils.c \
-    scope/scope.c \
-    scope/rigol/ds1000ze.c
+# ---- flags (shared by core & acquire) ----
+CFLAGS   ?= -O2 -g -std=c11 -Wall -Wextra -Wpedantic -Werror
+CFLAGS   += -MMD -MP
+CPPFLAGS ?= -I. -Iengine -Iscope -Iscope/rigol
+LDFLAGS  ?=
+LDLIBS   ?= -lpthread -lm
 
-# ---- Main + per-acquire file ----
-MAIN_SRC      := main.c
-acquire_func ?= example_acquire.c
-
-# Object lists (map %.c -> build/%.o correctly)
-CORE_OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(CORE_SRCS))
-MAIN_OBJ  := $(patsubst %.c,$(BUILD_DIR)/%.o,$(MAIN_SRC))
-ACQ_OBJ   := $(patsubst %.c,$(BUILD_DIR)/%.o,$(acquire_func))
-OBJS      := $(CORE_OBJS) $(MAIN_OBJ) $(ACQ_OBJ)
-DEPS      := $(OBJS:.o=.d)
-
-# Output name
-ACQ_BASE := $(notdir $(basename $(acquire_func)))
-TARGET   := $(BUILD_DIR)/$(ACQ_BASE)
-
-# ---- Toolchain & flags ----
-CC      ?= cc
-CFLAGS  ?= -O2 -g -std=c11 -Wall -Wextra -Wpedantic -Werror -MMD -MP \
-           -I. -Iengine -Iscope -Iscope/rigol
-LDFLAGS :=
-LDLIBS  :=
-
+# ---- NI-VISA (platform-specific) ----
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
-    CFLAGS  += -I/Library/Frameworks/VISA.framework/Headers
-    LDFLAGS += -F/Library/Frameworks/ -framework VISA
-    LDLIBS  += -lpthread
+  CPPFLAGS += -I/Library/Frameworks/VISA.framework/Headers
+  LDFLAGS  += -F/Library/Frameworks -framework VISA
 else
-    LDLIBS  += -lpthread -lvisa
+  LDLIBS   += -lvisa
 endif
 
-# ---- Default goal ----
-.PHONY: all
-all: $(TARGET)
+# ---- sources ----
+# main is shared; compile once and link explicitly (don't hide it in the archive)
+MAIN_SRC   := main.c
 
-# ---- Link final executable ----
-$(TARGET): $(OBJS)
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $(OBJS) $(LDLIBS) $(LDFLAGS) -o $@
-	@echo "Linked $@"
+CORE_SRCS := \
+  engine/engine.c \
+  engine/utils.c  \
+  scope/scope.c   \
+  scope/rigol/ds1000ze.c
 
-# ---- Compile .c -> build/*.o ----
-$(BUILD_DIR)/%.o: %.c
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
+# ---- derived ----
+TOP         := $(abspath .)
+CORE_BUILD  := $(TOP)/core_build
+CORE_LIB    := $(CORE_BUILD)/core.a
 
-# ---- Convenience ----
-.PHONY: run clean print
-run: $(TARGET)
-	$(TARGET)
+# main.o compiled to core_build as well (reused by all acquires)
+MAIN_OBJ    := $(CORE_BUILD)/$(MAIN_SRC:.c=.o)
+MAIN_DEP    := $(MAIN_OBJ:.o=.d)
 
+CORE_OBJS   := $(patsubst %.c,$(CORE_BUILD)/%.o,$(CORE_SRCS))
+CORE_DEPS   := $(CORE_OBJS:.o=.d)
+
+# --- Only demand 'acquire=' for build goals, not for clean/help ---
+ifeq ($(filter clean help,$(MAKECMDGOALS)),)
+  ifeq ($(strip $(acquire)),)
+    $(error Please invoke as 'make acquire=path/to/<file>.c' (try 'make help'))
+  endif
+endif
+
+
+ACQ_PATH  := $(abspath $(acquire))
+ACQ_NAME  := $(notdir $(basename $(ACQ_PATH)))
+ACQ_BUILD := $(TOP)/build_$(ACQ_NAME)
+ACQ_OBJ   := $(ACQ_BUILD)/$(ACQ_NAME).o
+ACQ_DEP   := $(ACQ_OBJ:.o=.d)
+ACQ_EXE   := $(ACQ_BUILD)/$(ACQ_NAME)
+
+# ---- default: build core (incl. main.o) if needed, then this acquire ----
+all: $(ACQ_EXE)
+
+# ---- core static library (engine/scope/etc.) ----
+$(CORE_LIB): $(CORE_OBJS)
+	@mkdir -p "$(dir $@)"
+	$(AR) $(ARFLAGS) "$@" $^
+
+# Compile core .c -> core_build/<same path>.o
+$(CORE_BUILD)/%.o: %.c
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c "$<" -o "$@"
+
+# Build shared main.o (explicit so it's not archived)
+$(MAIN_OBJ): $(MAIN_SRC)
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c "$<" -o "$@"
+
+# ---- acquire: object + link ----
+$(ACQ_OBJ): $(ACQ_PATH) | $(ACQ_BUILD)/
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c "$<" -o "$@"
+
+$(ACQ_BUILD)/:
+	@mkdir -p "$@"
+
+$(ACQ_EXE): $(ACQ_OBJ) $(MAIN_OBJ) $(CORE_LIB)
+	$(CC) $(LDFLAGS) -o "$@" $(ACQ_OBJ) $(MAIN_OBJ) $(CORE_LIB) $(LDLIBS)
+
+# ---- clean (scoped) ----
+.PHONY: clean
 clean:
-	rm -rf $(BUILD_DIR)
+ifeq ($(strip $(acquire)),)
+	@echo "Cleaning core only: $(CORE_BUILD)"
+	rm -rf "$(CORE_BUILD)"
+else
+	@echo "Cleaning acquire only: $(ACQ_BUILD)"
+	rm -rf "$(ACQ_BUILD)"
+endif
 
-print:
-	@echo "CORE_SRCS: $(CORE_SRCS)"
-	@echo "OBJS:      $(OBJS)"
-	@echo "TARGET:    $(TARGET)"
+# ---- help ----
+.PHONY: help
+help:
+	@echo "# Usage:"
+	@echo "#   make acquire=/abs/or/rel/path/to/rpi_acquire.c"
+	@echo "#   make clean                 # cleans core only"
+	@echo "#   make clean acquire=...     # cleans only build_<name> for that acquire"
 
-# ---- Auto-deps ----
--include $(DEPS)
+# ---- auto-deps ----
+-include $(CORE_DEPS) $(MAIN_DEP) $(ACQ_DEP)

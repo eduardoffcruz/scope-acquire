@@ -1,2 +1,5 @@
-build/
+core_build/
+build_pico2_acquire/
 scope/rigol/DS1000ZE_ProgManual.pdf
+_Makefile
+.DS_Store

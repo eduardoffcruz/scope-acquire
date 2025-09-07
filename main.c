@@ -6,6 +6,8 @@
 #include "scope/rigol/ds1000ze.h"
 
 int acquire(Scope *s, uint8_t *dst, const RunConfig *cfg);
+int prep(Scope *s, const RunConfig *cfg);
+int cleanup(void);
 
 int main(int argc, char **argv) {
     // Initialize the RunConfig and EngineCore
@@ -33,7 +35,7 @@ int main(int argc, char **argv) {
         return -3;
     }
 
-    int rc = engine_run(&core, acquire);
+    int rc = engine_run(&core, acquire, prep, cleanup);
     if (rc != 0) {
         fprintf(stderr, "[main] engine_run failed.\n");
         return -4;

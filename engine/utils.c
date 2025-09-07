@@ -200,13 +200,13 @@ FILE* open_log_file(const RunConfig *cfg){
 
     fprintf(fp_log,
         "acq_start_time=%s\n"
-        "instrument_name=%s\n"
+        //"instrument_name=%s\n"
         "channels=%s\n"
         "coding=%s\n"
         "nsamples=%zu\n"
         "ntraces_per_flush=%zu\n",
         tbuf,
-        (cfg->instr_name ? cfg->instr_name : ""),
+        //(cfg->instr_name ? cfg->instr_name : ""),
         chbuf,
         (cfg->coding == 0 ? "BYTE" : "SHORT"),
         cfg->n_samples,

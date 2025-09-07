@@ -15,6 +15,7 @@
 #include <getopt.h>
 #include <ctype.h>
 
+
 static volatile sig_atomic_t g_stop = 0;
 
 void engine_request_stop(void) { g_stop = 1; }
@@ -32,6 +33,7 @@ static const char usage[] =
     "  -n, --ntraces <N>         Number of traces to capture (0 = unlimited)\n"
     "  -b, --batch <N>           Traces per flush batch (>=1)\n"
     "  -w, --coding <0|1>        0=BYTE, 1=WORD\n"
+    "  -s, --nsamples <N>        Samples per trace per channel (0=auto-detect)\n"
     "  -c, --chan <NAME>         Add a single channel (repeatable)\n"
     "      --channels <LIST>     Comma-separated channel list\n"
     "      --diagnose            Run connectivity/capability checks and exit\n"
@@ -49,6 +51,7 @@ int engine_parse_cli_args(int argc, char **argv, EngineCore *engine) {
         {"ntraces",     required_argument, 0, 'n'},
         {"batch",       required_argument, 0, 'b'},
         {"coding",      required_argument, 0, 'w'},
+        {"nsamples",    required_argument, 0, 's'},
         {"chan",        required_argument, 0, 'c'},
         {"channels",    required_argument, 0, 1000},
         {"diagnose",    no_argument,       0, 1001},
@@ -73,6 +76,10 @@ int engine_parse_cli_args(int argc, char **argv, EngineCore *engine) {
             } break;
             case 'n':
                 engine->cfg->n_traces = strtoull(optarg, NULL, 10);
+                break;
+            case 's':
+                engine->cfg->n_samples = strtoull(optarg, NULL, 10);
+                engine->cfg->raw_start_idx = 1; 
                 break;
             case 'b':
                 engine->cfg->n_flush_traces = strtoull(optarg, NULL, 10);
@@ -178,7 +185,7 @@ static void *writer_thread_func(void *arg) {
     return NULL;
 }
 
-int engine_run(EngineCore *core, int (*acquire)(Scope *scope, uint8_t *dst, const RunConfig *cfg)) {
+int engine_run(EngineCore *core, int (*acquire)(Scope *scope, uint8_t *dst, const RunConfig *cfg), int (*prep)(Scope *scope, const RunConfig *cfg), int (*cleanup)(void)) {
     if (!core || !core->cfg || !core->scope || !acquire) return -1;
     RunConfig *cfg = core->cfg;
     Scope *scope   = core->scope;
@@ -321,21 +328,26 @@ int engine_run(EngineCore *core, int (*acquire)(Scope *scope, uint8_t *dst, cons
     size_t to_capture_total = cfg->n_traces;
     bool unlimited = (to_capture_total == 0);
 
-    // Initial scope arm
-    if (scope->driver->arm(scope) != 0) {
-        return -1000;
+    if(prep != NULL){
+        if (prep(scope, cfg)!=0){
+            fprintf(stderr, "[engine] prep() failed.\n");
+            g_stop = 1;
+        }
     }
 
     // --- inside engine_run acquisition loop ---
+    int ti = -1;
     while (!g_stop && (unlimited || core->total_traces_captured < to_capture_total)) {
         uint8_t *dst = active_buf + (traces_in_flush_batch * core->bytes_per_trace);
-
+        ti++;
         int rc = acquire(scope, dst, cfg);   // pass cfg if your signature has it
 
         if (rc == ACQ_ERR_ARM_TIMEOUT || rc == ACQ_ERR_TRIGGER_TIMEOUT) {
             // Soft miss: skip this trace and try again
+            fprintf(core->fp_log, "[engine] skipped trace %d (total_captured:%zu, acq_timeout_rc=%d)\n", ti,
+                        core->total_traces_captured, rc);
             if (cfg->verbose) {
-                fprintf(stdout, "[engine] skipped trace %zu (acq timeout rc=%d)\n",
+                fprintf(stdout, "[engine] skipped trace %d (total_captured:%zu, acq_timeout_rc=%d)\n", ti,
                         core->total_traces_captured, rc);
             }
             // do NOT increment traces_in_flush_batch nor total_traces_captured
@@ -344,6 +356,12 @@ int engine_run(EngineCore *core, int (*acquire)(Scope *scope, uint8_t *dst, cons
 
         if (rc < 0) {
             // Hard failure: try to re-establish the VISA link
+            fprintf(core->fp_log, "[engine] skipped trace %d (total_captured:%zu, acq_timeout_rc=%d)\n", ti,
+                        core->total_traces_captured, rc);
+            if (cfg->verbose) {
+                fprintf(stdout, "[engine] skipped trace %d (total_captured:%zu, acq_timeout_rc=%d)\n", ti,
+                        core->total_traces_captured, rc);
+            }
             fprintf(stderr, "[engine] acquire() rc=%d → attempting reconnect...\n", rc);
 
             usleep(1000000); // 1s back-off
@@ -433,6 +451,11 @@ int engine_run(EngineCore *core, int (*acquire)(Scope *scope, uint8_t *dst, cons
         pthread_mutex_destroy(&core->mutex);
     }
 
+    if(cleanup != NULL){
+        if (cleanup()!=0){
+            fprintf(stderr, "[engine] cleanup() failed.\n");
+        }
+    }
     // Always free buffers, destroy cfg and scope
     free(core->buf_a);
     free(core->buf_b);

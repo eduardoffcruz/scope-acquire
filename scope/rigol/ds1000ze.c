@@ -15,10 +15,10 @@ static void  ds1000ze_destroy         (Scope *s);
 static int  ds1000ze_arm             (Scope *s);
 static int  ds1000ze_stop            (Scope *s);
 static int  ds1000ze_force_trigger   (Scope *s);
-static int  ds1000ze_read_trace      (Scope *s, uint8_t *dst, RunConfig *cfg);
+static int  ds1000ze_read_trace      (Scope *s, uint8_t *dst, const RunConfig *cfg);
 static int  ds1000ze_check_if_armed  (Scope *s, bool *out);
 static int  ds1000ze_check_if_triggered(Scope *s, bool *out);
-static int  ds1000ze_dump_log        (Scope *s, FILE *fp, RunConfig *cfg);
+static int  ds1000ze_dump_log        (Scope *s, FILE *fp, const RunConfig *cfg);
 static int  ds1000ze_get_n_samples   (Scope *s, size_t *out, size_t *raw_start_idx);
 static int  ds1000ze_list_displayed_channels(Scope *s, char ***out, uint8_t *out_n);
 // helpers used before definition
@@ -104,10 +104,16 @@ static int ds1000ze_init(Scope *s, RunConfig *cfg){
         fprintf(stderr,"\"%s\" failed\n", cmd); 
         return -4; 
     }
-    if (scope_writeline(s, ":WAV:MODE RAW", 0) != 0) { 
+    if (scope_writeline(s, ":WAV:MODE RAW", 0) != 0) {  //:WAV:MODE NORM if you want to acquire in HIGHRES mode or other modes. or MATH/FFT channels!
         fprintf(stderr,":WAV:MODE RAW failed\n"); 
         return -5; 
     }
+
+    if (scope_writeline(s, ":TRIG:SWE SING", 0) != 0) { 
+        fprintf(stderr,":TRIG:SWE SING failed\n"); 
+        return -5; 
+    }
+
    
     /* Prefer AUTO memory depth so the scope chooses a sensible record length for the current timebase. */
     //(void)scope_writeline(s, ":ACQ:MDEP AUTO",  0);
@@ -119,13 +125,15 @@ static int ds1000ze_init(Scope *s, RunConfig *cfg){
 
 
     // Read n_samples
-    size_t L = 1;
-    int rc = ds1000ze_get_n_samples(s, &cfg->n_samples, &L);
-    if (rc != 0) {
-        fprintf(stderr, "Failed reading n_samples property from scope: rc = %d\n", rc);
-        return -8;
+    if (cfg->n_samples == 0){
+        size_t L = 1;
+        int rc = ds1000ze_get_n_samples(s, &cfg->n_samples, &L);
+        if (rc != 0) {
+            fprintf(stderr, "Failed reading n_samples property from scope: rc = %d\n", rc);
+            return -8;
+        }
+        cfg->raw_start_idx = L;
     }
-    cfg->raw_start_idx = L;
 
     return 0;
 }
@@ -143,43 +151,69 @@ static int ds1000ze_arm(Scope *s) {
     return scope_writeline(s, ":SING", 5);
 }
 
+// static int ds1000ze_check_if_armed(Scope *s, bool *armed) {
+//     char resp[8];
+//     if (!s || !armed)
+//         return -1;
+
+//     /* Query trigger status */
+//     if (scope_query(s, ":TRIG:STAT?", resp, sizeof resp) < 0)
+//         return -2;
+
+//     // rtrim(resp); no need since TERMCHAR_EN in query.
+
+//     if (strncmp(resp, "WAIT", 4) == 0) {
+//         *armed = true;
+//     } else {
+//         *armed = false;
+//     }
+
+//     return 0;
+// }
+
+// static int ds1000ze_check_if_triggered(Scope *s, bool *triggered) {
+//     char resp[8];
+
+//     if (!s || !triggered)
+//         return -1;
+
+//     /* Query trigger status */
+//     if (scope_query(s, ":TRIG:STAT?", resp, sizeof resp) < 0)
+//         return -2;
+
+//     /* No need to rtrim(): scope_query() truncates at '\n' */
+//     if (strncmp(resp, "TD", 2) == 0 || strncmp(resp, "STOP", 4) == 0) {
+//         *triggered = true;
+//     } else {
+//         *triggered = false;
+//     }
+
+//     return 0;
+// }
+
 static int ds1000ze_check_if_armed(Scope *s, bool *armed) {
-    char resp[8];
+    char resp[16];
     if (!s || !armed)
         return -1;
 
-    /* Query trigger status */
     if (scope_query(s, ":TRIG:STAT?", resp, sizeof resp) < 0)
         return -2;
 
-    // rtrim(resp); no need since TERMCHAR_EN in query.
-
-    if (strncmp(resp, "WAIT", 4) == 0) {
-        *armed = true;
-    } else {
-        *armed = false;
-    }
-
+    // "WAIT" or "READY" => armed
+    *armed = (resp[0] == 'W' || resp[0] == 'R');
     return 0;
 }
 
 static int ds1000ze_check_if_triggered(Scope *s, bool *triggered) {
-    char resp[8];
-
+    char resp[16];
     if (!s || !triggered)
         return -1;
 
-    /* Query trigger status */
     if (scope_query(s, ":TRIG:STAT?", resp, sizeof resp) < 0)
         return -2;
 
-    /* No need to rtrim(): scope_query() truncates at '\n' */
-    if (strncmp(resp, "TD", 2) == 0 || strncmp(resp, "STOP", 4) == 0) {
-        *triggered = true;
-    } else {
-        *triggered = false;
-    }
-
+    // "TD" or "STOP" => triggered
+    *triggered = (resp[0] == 'T' || resp[0] == 'S');
     return 0;
 }
 
@@ -188,7 +222,7 @@ static inline size_t max_points_per_read(uint8_t coding) {
     return (coding == 0) ? 250000u : 125000u;
 }
 
-static int ds1000ze_read_trace(Scope *s, uint8_t *dst, RunConfig *cfg) {
+static int ds1000ze_read_trace(Scope *s, uint8_t *dst, const RunConfig *cfg) {
     if (!s || !dst || !cfg || !cfg->channels || cfg->n_channels == 0) return -1;
     if (cfg->n_samples == 0 || cfg->raw_start_idx == 0) return -2;  /* must be set at init */
 
@@ -220,7 +254,7 @@ static int ds1000ze_read_trace(Scope *s, uint8_t *dst, RunConfig *cfg) {
             int n = snprintf(cmd, sizeof cmd, ":WAV:STARt %zu;:WAV:STOP %zu;:WAV:DATA?\n", start, stop);
             if (n <= 0 || (size_t)n >= sizeof cmd) return -4;
             if (scope_write(s, cmd, (size_t)n) != 0) return -5;
-            printf("Reading %zu points from %s (START=%zu, STOP=%zu)...\n", this_pts, cfg->channels[ch_i], start, stop);
+            //printf("Reading %zu points from %s (START=%zu, STOP=%zu)...\n", this_pts, cfg->channels[ch_i], start, stop);
 
             /* One read per chunk: exact SCPI definite-length block */
             const size_t need = this_pts * bps;
@@ -237,7 +271,7 @@ static int ds1000ze_read_trace(Scope *s, uint8_t *dst, RunConfig *cfg) {
 }
 
 
-static int ds1000ze_dump_log(Scope *s, FILE *fp_log, RunConfig *cfg){
+static int ds1000ze_dump_log(Scope *s, FILE *fp_log, const RunConfig *cfg){
     if (!s || !fp_log || !cfg) return -1;
     int first_error_rc = 0;
 
@@ -306,10 +340,10 @@ static int ds1000ze_dump_log(Scope *s, FILE *fp_log, RunConfig *cfg){
     size_t L = 1;
     rc = ds1000ze_get_n_samples(s, &n_samples, &L);
     if (rc == 0) {
-        if (fprintf(fp_log, "N_SAMPLES=%zu\nRAW_START_IDX=%zu\n", n_samples, L) < 0) 
+        if (fprintf(fp_log, "MDEPTH=%zu\nRAW_START_IDX=%zu\nNSAMPLES_READ=%zu\n", n_samples, L, cfg->n_samples) < 0) 
             return -2;
     } else {
-        if (fprintf(fp_log, "N_SAMPLES=FAILED\nRAW_START_IDX=FAILED\n") < 0) 
+        if (fprintf(fp_log, "MDEPTH=FAILED\nRAW_START_IDX=FAILED\nNSAMPLES_READ=FAILED\n") < 0) 
             return -2;
         if (first_error_rc == 0) first_error_rc = rc;
     }
@@ -333,6 +367,10 @@ static int ds1000ze_dump_log(Scope *s, FILE *fp_log, RunConfig *cfg){
 static void ds1000ze_destroy(Scope *s) {
     if (!s) return;
     ds1000ze_stop(s); // :STOP
+    if (s->instr_name) {
+        free(s->instr_name);
+        s->instr_name = NULL;
+    }
     scope_close(s);    // closes VISA
     free(s);           // free the Scope object
 }

@@ -15,7 +15,21 @@ static inline void simulate_trigger(Scope *s) {
     s->driver->force_trigger(s);
 }
 
-int acquire(Scope *s, uint8_t *dst, const RunConfig *cfg) {
+int prep(Scope *s, const RunConfig *cfg) {
+    (void)cfg; // silence unused param warning if not used    
+
+    // -- Initialize your target device here.
+    // ... your code ...
+
+    // -- Arm
+    if (s->driver->arm(s) != 0) {
+        return -1;
+    }
+
+    return 0;
+}
+
+int acquire(Scope *s, uint8_t *dst, RunConfig *cfg) {
     // 1) Arm
     if (s->driver->arm(s) != 0) {
         return -1;
@@ -50,7 +64,7 @@ int acquire(Scope *s, uint8_t *dst, const RunConfig *cfg) {
     }
 
     // 5) Read trace
-    return s->driver->read_trace(s, dst, (RunConfig *)cfg);
+    return s->driver->read_trace(s, dst, cfg);
     if (DEBUG) printf("Trace acquired.\n");
 }
 

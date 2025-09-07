@@ -80,7 +80,7 @@ typedef struct RunConfig {
 int engine_parse_cli_args(int argc, char **argv, EngineCore *engine);
 
 // Main orchestrator: allocate buffers, spawn writer thread, acquire & store
-int engine_run(EngineCore *engine, int (*acquire)(Scope *scope, uint8_t *dst, const RunConfig *cfg));
+int engine_run(EngineCore *core, int (*acquire)(Scope *scope, uint8_t *dst, const RunConfig *cfg), int (*pre)(Scope *scope, const RunConfig *cfg),int (*cleanup)(void));
 
 // Request a graceful stop (e.g., from a signal handler).
 void engine_request_stop(void);

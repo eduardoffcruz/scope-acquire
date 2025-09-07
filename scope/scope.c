@@ -171,10 +171,6 @@ int scope_close(Scope *s) {
         viClose(s->rm);
         s->rm = VI_NULL;
     }
-    if (s->instr_name) {
-        free(s->instr_name);
-        s->instr_name = NULL;
-    }
     return 0;
 }
 
@@ -404,7 +400,7 @@ int scope_reconnect(Scope *s) {
     scope_close(s);
 
     // Reopen
-    if (s->instr_name && s->instr_name[0]){
+    if (s->instr_name){
         if (scope_open(s) != 0){
             return -1;
         }
